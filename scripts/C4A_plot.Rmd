@@ -1,0 +1,385 @@
+---
+title: "C4A LocusZoom"
+author: "Jack Humphrey"
+date: "31/05/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse) 
+library(ggrepel)
+library(patchwork)
+library(ggrastr)
+```
+
+## R Markdown
+
+from fanny
+
+
+```{r}
+gwas <- read_tsv(here::here("data/farrell_psp_full_hits_1e6.tsv"), col_names = c("chr", "end", "snp", "ref", "alt", "frq_a", "frq_u", "info", "or", "se", "p", "coord"))
+gencode_meta <- read_tsv("~/GENCODE/gencode.v38.primary_assembly.gene_meta.tsv.gz")
+
+# fanny <- readxl::read_excel(path = "data/INFERNO/inferno_coloc_brainonly_shared.xlsx") %>% janitor::clean_names() %>%
+#     filter(grepl("Brain", tissue_category) )
+
+fanny2 <- readxl::read_excel(path = here::here("data/INFERNO/062323_inferno_coloc_brainonly_shared_full.xlsx") ) %>% janitor::clean_names() %>%
+    filter(grepl("Brain", tissue_category) )
+
+
+inferno_df <- readxl::read_excel(path = here::here("data/INFERNO/fanny_combine.xlsx"))
+
+locus_df <- tibble(
+  coloc_locus = c( "chr6_31318307_31377978_rs2523524_HLAB",
+"chr6_31666423_31918860_rs3115674_ABHD16A",
+"chr6_32019945_32107851_rs1265888_TNXB"),
+  locus_label = c("1", "2", "3")
+) %>%
+  mutate(lead_snp = str_split_fixed(coloc_locus, "_", 5)[,4])
+
+#coloc <- readxl::read_excel(path = "inferno_coloc_brainonly_shared.xlsx")
+
+
+gwas <- filter(gwas, chr == 6, end > 32020238 - 2e6 & end < 32020238 + 2e6)
+
+# highlight these SNPs from Inferno
+c4a_snps <- c("rs2596545","rs558702","rs1265905")
+
+gwas$snp_label <- ifelse(gwas$snp %in% c4a_snps, gwas$snp, "")
+
+gwas %>% arrange(p)
+
+
+fanny_df <- fanny2 %>%
+  filter(grepl("chr6_3", coloc_locus)) %>%
+  filter(coloc_nsnps > 1 & coloc_pp_h4_abf  > 0.8) %>%
+  select(gene = coloc_gtex_gene_symb, locus = coloc_locus, pp4 = coloc_pp_h4_abf) %>%
+  group_by(gene, locus) %>%
+  tally()
+
+fanny_meta <- filter(gencode_meta, gene_name %in% fanny_df$gene) %>%
+  arrange(gene_start)
+
+# locus zoom overlaid with the 3 sets
+gwas_df <- 
+  gwas %>%
+  left_join(inferno_df, by = c("snp" = "coloc_rsid") ) %>%
+  mutate(coloc_locus = ifelse(grepl("MICA", coloc_locus), NA, coloc_locus)) %>%
+  left_join(locus_df, by = "coloc_locus")  %>%
+  mutate(snp_label = ifelse(snp %in% locus_df$lead_snp, snp, "")) %>%
+  mutate(locus_n_label = paste0("Set ", locus_label)) %>%
+  mutate(locus_n_label = ifelse(snp %in% locus_df$lead_snp, locus_n_label, "") ) %>%
+  select(snp_label, end, p, locus_label, locus_n_label) %>%
+  distinct()
+
+locus_plot <-  
+  gwas_df %>%
+  ggplot(aes(x = end, y = -log10(p))) + 
+  theme_classic() +
+  geom_text_repel(aes(label = locus_n_label),
+                   max.overlaps = 100,force = 10, min.segment.length = unit(0, "lines"), direction = "y", nudge_y = 1 
+  ) +
+  labs(x = "", y = expression(-log[10](P[GWAS])), colour = "Set", title = "6p21.32") +
+  geom_point(data = filter(gwas_df, is.na(locus_label) ), colour = "darkgray", size = 1  ) +
+  geom_point(data = filter(gwas_df, !is.na(locus_label) ), aes(colour = locus_label), size = 1) + 
+  geom_hline(yintercept = -log10(5e-8), linetype = 3 )+
+  scale_x_continuous(labels = scales::label_comma(), limits = c(32020238 - 1e6,  32020238 + 1e6) ) +
+  scale_y_continuous(limits = c(0,10.5), expand = c(0,0), breaks = c(0,4,8)) +
+  guides(colour = "none")# +
+ # theme(legend.position = c(0.9, 0.95), legend.background = element_blank(), legend.direction="horizontal" )
+
+locus_plot
+
+```
+
+
+Gene plot
+
+```{r}
+c4a_genes <- 
+  gencode_meta %>%
+  filter(gene_name %in% c("TNXB", fanny2$coloc_gtex_gene_symb) ) %>%
+  filter(chr == "chr6", gene_start > 30e6 & gene_end < 33e6) %>%
+  mutate(mid =  gene_start + (gene_end - gene_start)/2)
+# fanny - 35 - fanny2 = 35
+
+gene_df <-  filter(c4a_genes, gene_name %in% c(fanny_df$gene, "TNXB" ) )
+
+gene_plot <- 
+  ggplot() + 
+ #geom_segment(data = filter(c4a_genes, gene_name %in% c(fanny_df$gene) ), aes(x = gene_start, xend = gene_end, y = 0, yend = 0.5)) +
+  geom_text_repel(data = filter(c4a_genes, gene_name %in% c(fanny_df$gene, "TNXB") ), aes(label = gene_name, x = mid, y = 0), direction = "y", 
+                  max.overlaps = 100,force = 10, min.segment.length = unit(1000, "lines"), fontface = "italic", size = 3 ) + 
+  theme_classic() +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank() ) +
+  labs(x = "", y = "") +
+  scale_x_continuous(labels = scales::label_comma(), limits = c(32020238 - 1e6,  32020238 + 1e6) )
+
+
+gene_plot
+
+library(patchwork)
+
+# multiplot
+
+
+#(locus = locus_plot, genes = gene_plot, heights = c(1,0.25))
+
+# gwas %>%
+#   ggplot(aes(x = end, y = -log10(p))) + 
+#   geom_point() + 
+#   geom_hline(yintercept = -log10(5e-8), linetype = 3 ) +
+#   geom_text_repel(
+#     data = filter(gwas, snp_label != ""), 
+#     aes(label = snp_label), min.segment.length = unit(0, "lines"), nudge_y = 1,
+#     )+
+#   geom_point(data = filter(gwas, snp %in% fanny_snps$coloc_rsid), aes(x = end, y = -log10(p)), colour = "orange") +
+#   geom_point(
+#     data = filter(gwas, snp_label != ""), 
+#     aes(x = end, y = -log10(p)), colour = "red") +
+#   theme_classic()
+
+```
+
+
+
+```{r}
+
+#fanny <- readxl::read_excel("COLOC/PSP_1109_aggregated_brain.xlsx") %>% janitor::clean_names()
+
+#d <- readxl::read_excel(path = "fanny_combine.xlsx") %>% janitor::clean_names()
+
+fanny2 %>%
+    filter(coloc_nsnps > 1 & coloc_pp_h4_abf  > 0.5) %>%
+  #filter(coloc_locus_chr != "chr17") %>%
+  filter(coloc_locus_chr == "chr6") %>%
+  filter(grepl("chr6_3", coloc_locus)) %>%
+  filter(coloc_nsnps > 1 & coloc_pp_h4_abf  > 0.5) %>%
+  mutate(coloc_tissue = gsub("_", "\n", tissue_category)) %>%
+  ggplot(aes(x = coloc_tissue, y = coloc_gtex_gene_symb)) + 
+  geom_tile(aes(alpha = coloc_pp_h4_abf), fill = "red") +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_y_discrete(expand = c(0,0) ) +
+  theme_classic() +
+  theme(strip.text.y.right = element_text(angle = 0)) +
+  facet_grid(coloc_locus ~ ., scales = "free",space = "free"  ) +
+  ggeasy::easy_rotate_x_labels(angle = 45, side = "right")
+
+
+coloc_df <-
+  fanny_df %>%
+  left_join(c4a_genes, by = c("gene" = "gene_name") ) %>%
+  filter(gene_start > 32020238 - 1e6, gene_end <  32020238 + 1e6)
+
+
+coloc_plot <- 
+coloc_df %>% 
+  mutate(gene = factor(gene, levels = fanny_meta$gene_name)) %>%
+  left_join(locus_df, by = c("locus" = "coloc_locus") ) %>%
+  ggplot(aes(y = locus_label, x = gene, label = n)) + 
+  geom_point(aes(size = n, colour = locus_label)) +
+  geom_text(colour = "white", fontface = "bold") + 
+  scale_size_continuous(range = c(7,12) ) +
+  theme_bw() +
+  guides(colour = "none") +
+  theme_classic() +
+  scale_y_discrete(limits = rev) +
+  labs(size = "N COLOC w/ PP4 > 0.9", y = "Set", x = "", title = "GTEx Brain Colocalizations PP4 > 0.9 ") +
+  theme(axis.text.x = element_text(face = "italic", colour = "black")) +
+  guides(size = "none")
+
+
+
+coloc_plot 
+
+```
+
+Plot COLOCs - GWAS P against eQTL P
+
+```{r}
+
+table(inferno_df$coloc_locus)
+
+c4a_locus_df <- inferno_df %>%
+  filter(!grepl("MICA",coloc_locus) ) %>%
+  left_join(locus_df, by = "coloc_locus") %>%
+  filter(coloc_gtex_geneSymb == "C4A", coloc_tissue == "Brain_Frontal_Cortex_BA9") %>%
+  select(p_gwas = coloc_gwas_pvalue, p_qtl = coloc_gtex_pvalue, locus_label = locus_label  )
+
+```
+  
+
+
+Jack's COLOC on GTEx FC v8
+
+```{r}
+coloc_res <- read_tsv(here::here("COLOC/GTEX_Brain_Frontal_Cortex_BA9_Farrell_PSP_COLOC.tsv"))
+gencode_meta$gene_id_notag <- gsub("\\.[0-9]*" ,"", gencode_meta$gene_id)
+
+coloc_res$gene_name  <- gencode_meta$gene_name[match(coloc_res$gene, gencode_meta$gene_id_notag)]
+
+load(here::here("COLOC/GTEX_Brain_Frontal_Cortex_BA9_Farrell_PSP_COLOC.RData"))
+
+coloc_obj <- all_obj$TNXB$ENSG00000244731$object$results
+all_obj$TNXB$ENSG00000244731$object$summary
+length(unique(coloc_obj$snp))
+# 14,376 SNPs matched
+
+coloc_obj %>%
+  ggplot(aes(x = -log10(pvalues.gwas), y = -log10(pvalues.qtl))) + geom_point() +
+  theme_bw() +
+  labs(title = "Full locus COLOC - PP4 = 2e-5")
+
+coloc_obj %>%
+  select(snp, pos, pvalues.gwas, pvalues.qtl) %>%
+  pivot_longer(cols = !c(snp, pos), names_to = "set", values_to = "p") %>%
+  ggplot(aes(x = pos, y = -log10(p))) + 
+  geom_point() +
+  facet_wrap(~set, nrow = 2)
+
+
+c4a_full_locus_df <- coloc_obj %>%
+  select(p_gwas = pvalues.gwas, p_qtl = pvalues.qtl ) %>%
+  mutate(locus_label = "0")
+
+#ENSG00000244731
+```
+
+  
+Combine full locus COLOC with INFERNO subset colocs  
+
+```{r}
+
+all_c4a_coloc_df <- 
+  bind_rows(c4a_full_locus_df,c4a_locus_df  )
+
+# get PP4s
+# full = 2.859274e-05
+locus_pp4_df <- fanny2 %>%
+  filter(fanny2$tissue_category == "Brain Frontal Cortex BA9", coloc_gtex_gene_symb == "C4A") %>%
+  select(coloc_locus, coloc_pp_h4_abf) %>%
+  left_join(locus_df, by = "coloc_locus") %>%
+  mutate(locus_pp4_label = paste0("Set ", locus_label, "\nPP4 = ", signif(coloc_pp_h4_abf, 2)))
+
+locus_pp4_df <- bind_rows(
+  locus_pp4_df,
+  tibble(coloc_locus = "All SNPs", locus_label = "All SNPs", coloc_pp_h4_abf = 2.9e-5) %>%
+      mutate(locus_pp4_label = paste0(locus_label, "\nPP4 = ", signif(coloc_pp_h4_abf, 2)))
+)
+
+library(patchwork)
+# full colocalization 
+
+coloc_locus_plot <- 
+  all_c4a_coloc_df %>%
+  filter(locus_label == 0) %>%
+  mutate(locus_label = "All SNPs") %>%
+  left_join(locus_pp4_df, by = "locus_label") %>%
+  ggplot(aes(x = -log10(p_gwas), y = -log10(p_qtl))) + 
+  geom_point(size = 1, colour = "darkgray") +
+  facet_wrap( ~ locus_pp4_label, scales = "free_y", nrow = 1 ) + labs(title = "C4A", subtitle = "Full colocalization\nGTEx Frontal Cortex BA9 (v8)") +
+  theme_classic() +
+  theme(plot.title = element_text(face = "italic")) +
+  guides(colour = "none") +
+labs(x = expression(-log[10](P[GWAS])),
+     y = expression(-log[10](P[eQTL])))  + 
+
+# INFERNO colocalizations
+all_c4a_coloc_df %>%
+  filter(locus_label != 0) %>%
+  left_join(locus_pp4_df, by = "locus_label") %>%
+  ggplot(aes(x = -log10(p_gwas), y = -log10(p_qtl))) + 
+  geom_point(aes(colour = locus_label), size = 1) +
+  facet_wrap( ~ locus_pp4_label, nrow = 1 ) + labs(title = "C4A", subtitle = "INFERNO colocalizations\nGTEx Frontal Cortex BA9 (v7)") +
+  theme_classic() +
+  theme(plot.title = element_text(face = "italic")) +
+  guides(colour = "none") +
+labs(x = expression(-log[10](P[GWAS])),
+     y = expression(-log[10](P[eQTL]))) +
+  
+plot_layout(nrow = 1, widths = c(1,3)) +
+  plot_annotation(title = "C4A") &
+  theme(strip.background = element_blank() )
+```
+
+```{r fig.height=8, fig.height=10}
+#coloc_locus_plot
+multiplot <- 
+locus_plot + gene_plot + coloc_plot + coloc_locus_plot + plot_layout(nrow = 4, heights = c(0.8,0.33, 0.6, 0.7) ) + plot_annotation(tag_levels = "a") & theme(plot.tag = element_text(face = "bold") ) &
+ scale_colour_manual(values = c("darkorange", "forestgreen", "purple4")) &
+  theme(axis.text = element_text(colour = "black"), axis.ticks = element_line(colour = "black")) &
+  theme(plot.margin = margin(1,5,1,5))
+
+multiplot
+ggsave(plot = multiplot, filename = here::here("figures/c4a_multiplot.pdf"), width = 8, height = 10)
+
+```
+
+Plot the direction of effect
+
+```{r}
+# direction is flipped to align with risk allele
+c4a_beta_plot <- 
+  fanny2 %>%
+  filter(coloc_gtex_gene_symb == "C4A") %>%
+  left_join(locus_df, by = "coloc_locus") %>%
+  filter(!is.na(locus_label)) %>%
+  mutate(locus_label = paste0("Set ", locus_label, "\n", lead_snp )) %>%
+  mutate(tissue = gsub("Brain ", "", tissue_category)) %>%
+  mutate(coloc_gtex_beta = -coloc_gtex_beta) %>%
+  ggplot(aes(x = tissue, y = coloc_gtex_beta)) +
+  facet_wrap(~locus_label, ncol = 1) +
+  geom_point() +
+  geom_errorbar(aes(ymin = coloc_gtex_beta - coloc_gtex_stderr, ymax = coloc_gtex_beta + coloc_gtex_stderr), width = 0.5) +
+  #coord_flip() +
+  #ylim(-2, 0) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  labs(title = "C4A", y = "Effect size relative to lead Set SNP", x = "Brain regions (GTEx v7)" ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, colour = "black")) +
+  scale_x_discrete(limits = rev) +
+  theme(strip.background = element_blank(), plot.title = element_text(face = "italic"))
+
+c4a_beta_plot
+ggsave(plot = c4a_beta_plot, filename = here::here("figures/c4a_beta_plot.pdf"), width = 7, height = 6 )
+
+
+fanny2 %>%
+  filter(coloc_gtex_gene_symb == "C4A") %>%
+  select(coloc_locus, coloc_snp) %>% 
+  distinct()
+
+```
+
+
+Fanny COLOCs for Kurt's table
+
+```{r}
+fanny_locus_key <- fanny2 %>% 
+  select(coloc_locus, chr = coloc_locus_chr, start = coloc_locus_chr_start, end = coloc_locus_chr_end)  %>%
+  distinct() %>%
+  mutate(locus_id = case_when(
+    chr == "chr1" ~ "1q25.3",
+    chr == "chr3" ~ "3p22.1",
+    chr == "chr6" & end < 4e7 ~ "6p21.1",
+    chr == "chr6" & end > 4e7 ~ "6p21.32",
+    chr == "chr12" ~ "12p12.1",
+    chr == "chr17" ~ "17q21.31"
+  ))
+
+
+
+fanny_table <- 
+  fanny2 %>%
+  filter(coloc_nsnps > 1 & coloc_pp_h4_abf  > 0.5) %>%
+  left_join(fanny_locus_key, by = "coloc_locus") %>%
+  group_by(coloc_gtex_gene_symb,locus_id) %>%
+  tally() %>%
+  arrange(desc(locus_id)) %>%
+  select(locus_id, gene = coloc_gtex_gene_symb, n_coloc_pp0.5 = n)
+
+write_tsv(fanny_table, file = here::here("inferno_coloc_tally.tsv"))
+```
+

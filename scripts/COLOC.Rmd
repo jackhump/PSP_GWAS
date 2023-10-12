@@ -1,0 +1,252 @@
+---
+title: "COLOC"
+author: "Jack Humphrey"
+date: "10/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+
+```
+
+
+```{r}
+prep_coloc <- function( all_res, ld_res, LD = FALSE){
+  all_coloc_res <- read.table( all_res, header=TRUE)
+  if(LD){
+  coloc_res_ld <- read.table(ld_res, header= TRUE)
+  
+  coloc_res <- full_join(all_coloc_res, coloc_res_ld)
+  }else{
+    coloc_res <- all_coloc_res
+    coloc_res$LD <- NA
+  }
+  
+  coloc_res <- left_join(coloc_res, qtl_meta, by = c("QTL" = "dataset"))
+  coloc_res$type <- "eQTL"
+  coloc_res$type <- ifelse(grepl("splicing|sQTL", coloc_res$QTL), "sQTL", coloc_res$type)
+
+  #coloc_res$assay <- ifelse(grepl("Bryois", coloc_res$QTL), "Single-cell", "Brain regions")
+
+  coloc_res <- mutate(coloc_res, coloc = PP.H3.abf + PP.H4.abf > 0.8 & (PP.H4.abf / PP.H3.abf) >= 2 )
+  coloc_res$SNP_distance <- abs(coloc_res$GWAS_pos - coloc_res$QTL_pos)
+  
+  coloc_res <- mutate(coloc_res, distance_filter = case_when( 
+    type == "eQTL" & SNP_distance < 5e5 | (!is.na(LD) & LD >= 0.1 ) ~ "PASS",
+    type == "sQTL" & SNP_distance < 1e5 | (!is.na(LD) & LD >= 0.1) ~ "PASS",
+    TRUE ~ "FAIL"
+  ) )
+  
+  
+  table(coloc = coloc_res$coloc, filter = coloc_res$distance_filter)
+  coloc_res <- filter(coloc_res, distance_filter == "PASS")
+  return(coloc_res)
+}
+```
+
+```{r}
+make_coloc_plot <- function(mydisease, min_gwas_p = 1e-5, min_PP4 = 0.7, all = all_coloc ){
+  # get out loci that contain at least one gene with PP4 > min_PP4
+  coloc_hits <- filter(all, disease == mydisease, PP.H4.abf > min_PP4 )
+  
+  to_plot <- 
+  all_coloc %>%
+  filter(disease == mydisease & distance_filter == "PASS") %>%
+  #filter(!is.na(tissue)) %>%
+  filter(paste(locus, QTL_Gene) %in% paste(coloc_hits$locus, coloc_hits$QTL_Gene) ) %>%
+  select(QTL, locus, PP.H4.abf, type, QTL_Gene) %>%
+  group_by(QTL, locus, type, QTL_Gene) %>%
+  # for sQTLs - show best PP4
+  summarise(PP.H4.abf = max(PP.H4.abf) ) %>%
+  left_join(all) %>%
+  mutate(h4 = signif(PP.H4.abf, digits = 2)) %>%
+  # throw out PP4 less than 0.1
+  mutate(h4 = ifelse(h4 < 0.1, NA, h4) ) #%>%
+  #mutate(locus = paste0(locus, "\n", "P=", signif(GWAS_P, 2) ) ) %>%
+ # mutate(locus = factor(locus, levels = rev(locus_order)))
+
+  to_plot %>%
+    mutate(direction = ifelse(sign(GWAS_SNP_Beta) > 0, "Up", "Down")) %>%
+  ggplot(aes(y = QTL_Gene, x = QTL)) + 
+   geom_point(aes(
+     #colour = PP.H4.abf,
+   #  shape = type, 
+     size = PP.H4.abf, 
+    # alpha = PP.H4.abf
+    #colour = direction#sign(GWAS_SNP_Beta)#,
+   ),
+    colour = "black"
+     ) + 
+    #geom_point(data = filter(to_plot, PP.H4.abf > 0.8), colour = "white", shape = 8, size = 8) +
+    geom_text(data = filter(to_plot, PP.H4.abf >= 0.75), aes(label = "*"), colour = "white", nudge_y= -0.22, size = 7.5) +
+  #geom_tile(aes(alpha = PP.H4.abf), fill = "red" ) +
+  #geom_text(aes(label = h4), nudge_x = 0.25) +
+  facet_grid(coordinate ~ assay, scales = "free",space = "free", switch = "y"  ) +
+   #scale_colour_manual(values = c("dodgerblue3","firebrick"), na.value = "gray") +
+  theme_bw() +
+    theme(strip.text.y.left = element_text(angle = 0, colour = "black", hjust = 0.5, face = "bold"), 
+          strip.text.x = element_text(angle = 0, colour = "black", face = "bold"), 
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"), 
+          axis.text.y.left = element_text(face = "italic", colour = "black"),
+          strip.background = element_blank(), 
+          legend.position = "top",
+          legend.box.margin = margin(c(0,0,0,0)), 
+          legend.margin = margin(c(0,0,0,0)),
+          strip.placement = "outside",
+          panel.spacing.y = unit(x = 0,units = "points"), 
+          panel.border = element_rect(fill = NA, size = 0.2, colour = "black"), 
+          panel.spacing.x = unit(x = 0,units = "points"),
+          panel.grid = element_blank(),
+          axis.ticks = element_line(colour = "black")
+          ) +
+    scale_size_continuous(name = "PP4", limits = c(0,1)) +
+    scale_alpha_continuous(name = "PP4", limits = c(0,1)) +
+    #guides(colour = "none" ) +
+    scale_x_discrete(position = "bottom") +
+    labs(x = "", y = "", colour = "Direction of effect") + 
+    scale_fill_viridis_c(name = "PP4", na.value = "gray") #+ scale_colour_manual() #, title = disease_title , subtitle = paste0(gwas_subtitle, "; min H4 = ", min_h4)  )
+}
+
+#make_coloc_plot("PSP", min_PP4 = 0.5)
+```
+
+
+
+```{r}
+coloc_res <- here::here("COLOC/all_COLOC_results_merged_H4_0_no_LD.tsv.gz")
+ld_res <-  here::here("COLOC/all_COLOC_results_merged_H4_0.5_with_LD.tsv.gz")
+
+qtl_meta <- readxl::read_excel(here::here("../GWAS/GWAS-QTL_data_dictionary.xlsx"), sheet = 2) %>%
+   select(dataset, N)
+
+
+gene_meta <- read_tsv("~/GENCODE/gencode.v30.tx2gene.tsv.gz")
+gene_meta$no_tag <- gsub("\\.[0-9]+", "", gene_meta$GENEID)
+
+all_coloc <- prep_coloc(coloc_res, ld_res, LD = TRUE) %>% filter( !grepl("sQTL", QTL) ) #%>% filter(!grepl("MiGA", QTL))
+
+# set assay
+all_coloc <- mutate(all_coloc, assay = case_when(
+  grepl("Bryois", QTL) ~ "Single-nucleus RNA-seq (Bryois)",
+  grepl("ROSMAP_DLPFC", QTL) ~ "Single-nucleus RNA-seq (Fujita)",
+  grepl("Microglia|MiGA", QTL) ~ "Sorted microglia",
+  grepl("SEA_AD_MTG", QTL) ~ "Single-nucleus RNA-seq (SEA-AD)",
+  !grepl("Bryois", QTL) ~ "Brain regions (GTEx v8)",
+))
+
+
+all_coloc$disease <- "PSP"
+
+# fix genes
+all_coloc$ensembl_gene1 <- gene_meta$GENENAME[match(all_coloc$QTL_Gene, gene_meta$GENENAME)]
+all_coloc$ensembl_gene2 <- gene_meta$GENENAME[match(all_coloc$QTL_Gene, gene_meta$no_tag)]
+all_coloc$ensembl_gene3 <- gene_meta$GENENAME[match(all_coloc$QTL_Ensembl, gene_meta$GENEID)]
+all_coloc$QTL_Gene <- coalesce( all_coloc$ensembl_gene1, all_coloc$ensembl_gene2, all_coloc$ensembl_gene3)
+
+
+
+#all_coloc$QTL <- gsub("DLPFC_ROSMAP", "Dorsolateral Prefrontal Cortex", all_coloc$QTL)
+all_coloc$QTL <- gsub("Bryois_", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("GTEX_Brain_", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("_basal_ganglia", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("ROSMAP_DLPFC_", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("SEA_AD_MTG", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("_eQTL_EUR", "", all_coloc$QTL)
+all_coloc$QTL <- gsub("_", " ", all_coloc$QTL)
+#filter(all_coloc, locus == "MOBP", distance_filter == "PASS", PP.H4.abf > 0.5)
+
+
+all_coloc <- filter(all_coloc, locus != "MAPT", assay != "Sorted microglia", QTL != "DLPFC ROSMAP") %>%
+  filter(QTL != "Meta microglia snRNA eQTL")
+
+# for paper - remove Fujita and SEA-AD
+all_coloc <- filter(all_coloc, assay %in% c("Brain regions (GTEx v8)", "Single-nucleus RNA-seq (Bryois)"))
+
+locus_df <- tibble(
+  locus = c("MOBP", "RUNX2", "SLCO1A2", "STX6", "TNXB"),
+  coordinate = c("3p22.1", "6p21.1", "12p12.1", "1p25.3", "6p21.32")
+)
+
+all_coloc <- left_join(all_coloc, locus_df, by = "locus")
+
+
+plot <- make_coloc_plot("PSP", min_PP4 = 0.5) #+ guides(colour = "none", shape = "none")
+plot
+ggsave(plot, filename = here::here("COLOC/all_COLOC_results.pdf"), height = 6, width = 8)
+
+```
+
+
+Plot betas
+
+```{r}
+coloc_results <- 
+  filter(all_coloc, distance_filter == "PASS", PP.H4.abf > 0.5) %>%
+ # filter(assay %in% c("Single-nucleus RNA-seq (Bryois)", "Brain regions") ) %>%
+  mutate(GWAS_coord = paste0(GWAS_chr, ":", GWAS_pos),
+         QTL_coord = paste0(QTL_chr, ":", QTL_pos)) %>%
+  select(locus, GWAS_P, QTL_dataset = QTL, QTL_N = N, QTL_SNP, QTL_coord, QTL_Beta, QTL_SE, QTL_P, QTL_MAF, QTL_Gene, SNP_N = nsnps, PP4 = PP.H4.abf, SNP_distance, SNP_LD = LD, GWAS_SNP_Beta, GWAS_SNP_SE, GWAS_SNP_P) %>%
+  arrange(GWAS_P, desc(PP4) ) %>%
+  select(-GWAS_P) %>%
+  mutate(QTL_MAF = signif(QTL_MAF, 3), QTL_P = signif(QTL_P, 3), PP4 = signif(PP4, 3), GWAS_SNP_Beta = signif(GWAS_SNP_Beta, 3), GWAS_SNP_SE = signif(GWAS_SNP_SE,3), GWAS_SNP_P = signif(GWAS_SNP_P)
+  )
+
+# use the risk alleles 
+allele_df <-
+  data.frame( GWAS_SNP = c(
+    "rs1044595",
+    "rs631312", 
+    "rs12197948" 
+  ),
+  allele = c(
+    "STX6\nrs1044595-C",
+    "MOBP\nrs631312-G", 
+    "RUNX2\nrs12197948-A" 
+  ))
+
+
+beta_plot <- 
+all_coloc %>%
+  filter( distance_filter == "PASS", PP.H4.abf > 0.5) %>%
+  left_join(allele_df, by = "GWAS_SNP") %>%
+  mutate(allele = factor(allele, levels = allele_df$allele)) %>%
+  filter(!is.na(GWAS_SNP_Beta), locus %in% c("MOBP", "RUNX2", "STX6"), QTL_Gene %in% c("MOBP", "STX6", "RUNX2") ) %>%
+  #mutate(QTL_Gene = paste0(QTL_Gene, "\n", allele)) %>%
+  mutate(assay = gsub(" \\(", "\\\n\\(", assay) ) %>%
+  # fix betas to be relative to risk allele
+  mutate(GWAS_SNP_Beta = case_when(
+  QTL_Gene == "STX6" & assay == "Brain regions\n(GTEx v8)" ~ -GWAS_SNP_Beta,
+  QTL_Gene == "RUNX2" ~ -GWAS_SNP_Beta,
+  TRUE ~ GWAS_SNP_Beta
+  )) %>%
+  ggplot(aes(x = QTL, y = GWAS_SNP_Beta)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = GWAS_SNP_Beta - GWAS_SNP_SE, ymax = GWAS_SNP_Beta + GWAS_SNP_SE), width = 0.33) + 
+facet_grid(allele~assay, scales = "free_x", space = "free", switch = "y") +#, switch = "y") +
+  theme_classic() +
+  #scale_x_discrete(limits = rev) +
+  theme(strip.text.y.left = element_text(angle = 0)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  labs(title = "Direction of expression with risk allele", x ="", y ="") +
+  theme(strip.background = element_blank(), strip.placement = "outside",
+                  axis.text.x = element_text(angle = 45, hjust = 1, colour = "black")
+        )
+
+beta_plot
+plot
+
+#ggsave(multiplot, filename = "COLOC/All_COLOC_plus_direction.pdf", height = 10, width = 7)
+
+ggsave(beta_plot, filename = here::here("COLOC/MOBP_STX6_RUNX2_betas.pdf"), height = 5, width = 7)
+
+write_tsv(coloc_results, here::here("COLOC/kurt_psp_coloc_results.tsv") )
+
+
+```
+
+
+
+

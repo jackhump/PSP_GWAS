@@ -1,0 +1,64 @@
+---
+title: "Reanalysis of Blood data"
+author: "Jack Humphrey"
+date: "08/05/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+```
+
+
+```{r fig.width = 10, fig.height = 10}
+d <- readLines(here::here("data/nachun_blood/gds_result.txt"))
+d <- d[grepl("ftd", d)]
+d <- as.data.frame(str_split_fixed(d, "\\. |, ", 4))
+names(d) <- c("a", "b", "disease", "sample")
+d$sample <- gsub(" \\[ftd\\]", "", d$sample)
+
+genes <- read_tsv(here::here("data/nachun_blood/GSE140830_final_normalized_data.txt.gz"))
+genes <- column_to_rownames(genes, "ID_REF")
+
+#d$sample %in% names(genes)
+
+group_by(d, disease) %>% tally()
+
+
+gene_plot <- function(gene, return_table = FALSE){
+  if( !gene %in% row.names(genes)){return(NA)}
+  #stopifnot(gene %in% row.names(genes))
+  
+  genes_loc <- genes[gene,]
+  to_plot <- 
+  genes_loc %>%
+    rownames_to_column(var = "gene") %>%
+    pivot_longer(names_to = "sample", values_to = "expression", cols = !c(gene))  %>%
+    left_join(d, by = "sample") %>%
+    filter(!is.na(disease)) %>%
+    filter(disease %in% c("Control", "PSP"))
+  if(return_table){return(to_plot)}
+  to_plot %>%
+    ggplot(aes(x = disease, y = expression)  )+ 
+    geom_jitter(aes(colour = disease),width = 0.25, height = 0) +
+    geom_boxplot(outlier.colour = NA, fill = NA, notch = TRUE) +
+    labs(title = gene) +
+    ggpubr::stat_compare_means() +
+    theme_classic()
+  
+}
+
+psp_genes <- c("MOBP", "STX6", "C4A","RUNX2", "MAPT", "SLCO1A2", "MSH5", "HLA-DPB1", "HLA-DMB")
+
+map(psp_genes, gene_plot) %>%
+  patchwork::wrap_plots() + patchwork::plot_layout(guides = "collect")
+
+result_df <- map_df(psp_genes, gene_plot, return_table = TRUE) %>%
+  select(-a, -b)
+
+write_tsv(result_df, here::here("Nachun_Coppolla_blood_PSP_gene_expression.tsv"))
+
+```
+

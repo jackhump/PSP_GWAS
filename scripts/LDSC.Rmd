@@ -1,0 +1,50 @@
+---
+title: "LDSC"
+author: "Jack Humphrey"
+date: "27/01/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+```{r}
+farrell <- read_tsv(here::here("data/Farrell_PSP.cell_type_results.txt") ) %>% mutate(disease = "PSP - this study")
+nalls <- read_tsv(here::here("data/Nalls_nott.results.txt")) %>% mutate(disease = "PD - Nalls et al., 2019")
+kunkle <- read_tsv(here::here("data/Kunkle_nott.results.txt")) %>% mutate(disease = "AD - Kunkle et al., 2019")
+  
+d <- bind_rows(farrell, nalls, kunkle ) %>% janitor::clean_names() %>%
+  tidyr::separate(col = name, into = c("cell", "feature", sep = "_") ) %>%
+  mutate(feature = gsub(".bed", "", feature)) %>%
+  mutate(cell = gsub("Oligo", "Oligodendrocyte", cell)) 
+
+d %>%
+  ggplot(aes(x = feature, y = coefficient)) + geom_point() + 
+  geom_errorbar(aes(ymin = coefficient - coefficient_std_error, ymax = coefficient + coefficient_std_error), width  = 0.5) +
+  geom_hline(yintercept = 0, linetype = 3) + 
+  facet_grid(disease ~cell) +
+  geom_text(aes(label = signif(coefficient_p_value, 2), x = feature, y = coefficient + coefficient_std_error + 1e-7 )) +
+  theme_bw() + theme(panel.grid = element_blank() )
+
+ldsc_plot <- d %>%
+  ggplot(aes(x = cell, y = -log10(coefficient_p_value) )) + geom_col(aes(fill = feature), position = position_dodge()) + 
+  #geom_errorbar(aes(ymin = coefficient - coefficient_std_error, ymax = coefficient + coefficient_std_error), width  = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = 3) + 
+   facet_wrap(~disease, ncol = 1, scales = "free_y") +
+  #geom_text(aes(label = signif(coefficient_p_value, 2), x = feature, y = coefficient + coefficient_std_error + 1e-7 )) +
+  theme_bw() + theme(panel.grid = element_blank() ) +
+  labs(y = "-log10(P)", x = "", fill = "" ) +
+  geom_hline(yintercept = 0) +
+  scale_y_continuous(expand = c(0,Inf)) +
+  theme(strip.background = element_blank(), text = element_text(colour = "black"), strip.text = element_text( size = 11, hjust = 0), axis.text = element_text(colour ="black"),panel.border = element_blank(), axis.line = element_line(), legend.position = c(0.85, 1) )
+
+ldsc_plot
+
+ggsave(ldsc_plot, filename = here::here("LDSC_plot.pdf"), width = 3.5, height = 6 )
+
+
+```
+

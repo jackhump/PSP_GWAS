@@ -1,0 +1,68 @@
+---
+title: "PSP GWAS genes in PSP brain"
+author: "Jack Humphrey"
+date: "06/03/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+```
+
+Cortex and Cerebellum RNA-seq from PSP cases and controls.
+
+```{r fig.width = 10, fig.height = 10}
+ctx <- read_csv(here::here("data/CTX_RNA_seq.csv")) %>% mutate(tissue = "Cortex")
+cer <- read_csv(here::here("data/Cere_RNA_seq.csv")) %>% mutate(tissue = "Cerebellum")
+
+all <- bind_rows(ctx,cer) %>% 
+  pivot_longer(cols = !c(ID, Diagnosis,Gender, Age, Sex, tissue), names_to = "gene", values_to = "expression" ) %>%
+  mutate( keep = case_when(
+    tissue == "Cortex" & gene %in% c("MOBP", "MSH5", "HLA_DPB1", "HLADMB", "FLOT1", "SLCO1A2") ~ TRUE,
+    tissue == "Cerebellum" & gene %in% c("MOBP", "MSH5", "STX6", "PLA2G7", "SLCO1A2") ~ TRUE,
+    TRUE ~ FALSE
+  )) %>%
+  filter(gene != "HLA-DMB") %>%
+  mutate(gene = case_when(
+    gene == "HLA_DPB1" ~ "HLA-DPB1",
+    gene == "HLADMB" ~ "HLA-DMB",
+    TRUE ~ gene
+  ))
+
+#, names_to = "gene", values_to = "expression")
+ctx_genes <- c("MOBP", "MSH5", "HLA-DPB1", "HLA-DMB", "FLOT1", "SLCO1A2")
+cer_genes <-  c("MOBP", "MSH5", "STX6", "PLA2G7", "SLCO1A2")
+
+colour_key = c( "PSP" =  "goldenrod","Control" ="dodgerblue2")
+
+make_plot <- function(gene_name, tissue_name){
+  plot <- all %>%
+    filter(gene == gene_name, tissue == tissue_name) %>%
+    ggplot(aes(x = Diagnosis, y = expression)) +
+    geom_boxplot(outlier.colour = NA, aes(fill = Diagnosis), colour = "black") +
+    geom_jitter(width = 0.25, size = 0.5) +
+    theme_classic() +
+    scale_fill_manual(values = colour_key) +
+    labs(x = "", y = "", title = gene_name) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold.italic"),
+          axis.ticks = element_line(colour = "black"), axis.text.x = element_blank(), axis.text.y = element_text(colour = "black") )
+  
+  if( gene_name == "MOBP"){
+    plot <- plot + labs(y = paste0(tissue_name, " expression"))
+  }
+  return(plot)
+}
+
+
+deg_plot <-
+c(map(ctx_genes, ~{make_plot(.x, tissue = "Cortex")}), map(cer_genes, ~{make_plot(.x, tissue = "Cerebellum")}) ) %>% patchwork::wrap_plots() + guide_area() +
+  plot_layout(nrow = 2, guides = 'collect')
+
+deg_plot
+
+ggsave(plot = deg_plot, filename = here::here("figures/psp_deg_plot.pdf"), width = 220, height = 120, units = "mm" )
+
+```
+

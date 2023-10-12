@@ -1,0 +1,97 @@
+---
+title: "Effect Directions"
+author: "Jack Humphrey"
+date: '2023-06-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+gwas <- read_tsv("data/farrell_psp_full_hits_1e6.tsv",col_names = c("chr", "end", "snp", "ref", "alt", "frq_a", "frq_u", "info", "or", "se", "p", "coord"))
+
+gencode_meta <- read_tsv("~/GENCODE/gencode.v30.tx2gene.tsv.gz")
+gencode_meta$geneid_notag <- gsub("\\.[0-9]+", "", gencode_meta$GENEID)
+
+gtex <- read_tsv("data/gtex_frontal_cortex_snps.txt")
+gtex$gene_name <- gencode_meta$GENENAME[match(gtex$molecular_trait_object_id, gencode_meta$geneid_notag)]
+
+filter(gtex, gene_name %in% c("C4A", "MOBP", "RUNX2", "STX6"))
+
+bryois <- read_tsv("data/bryois_oligo_cortex_snps.txt")
+
+bryois %>% filter(Gene %in% c("MOBP", "RUNX2", "STX6"))
+
+```
+
+## STX6
+
+```{r}
+filter(gwas, snp == "rs1044595")
+filter(bryois, Gene == "STX6")
+filter(gtex,  gene_name == "STX6")
+
+```
+
+in GTEx the effect allele is T but in Bryois the effect allele is C, so STX6 goes down with T relative to C (gtex) and goes up with C relative to T (bryois)
+so my COLOC colours are wrong.
+
+what's extra shitty here is that according to dbSNP, C is the minor allele, not T
+
+so your risk allele is C as it goes up in PSP cases.
+so to put all together, increased dosage of rs1044595-C is associated with increased STX6 expression in both bulk brain and oligodendrocytes, and with increased risk of PSP
+
+
+## MOBP
+
+```{r}
+filter(gwas, snp == "rs631312")
+filter(bryois, Gene == "MOBP")
+#filter(gtex,  gene_name == "MOBP")
+```
+MOBP expression is increased with dosage of rs631312-G. 
+G is minor allele with frequency ~ 25%, which is increased in PSP cases.
+So G is risk allele
+
+So increasing dosage of rs631312-G is associated with increased MOBP in oligodendrocytes and neurons and increased PSP risk.
+
+Risk allele increases MOBP
+
+## RUNX2
+
+```{r}
+filter(gwas, snp == "rs12197948")
+filter(bryois, Gene == "RUNX2")
+filter(gtex,  gene_name == "RUNX2")
+```
+
+rs12197948-G is minor allele with MAF ~ 30% in TopMed.
+Kurt's GWAS has allele frequencies of 0.7 and 0.64 so this is likely inverted and is frequency of A
+Which means frequency of G goes from 35% in controls to 30% in cases - increased G decreases PSP risk.
+G is protective
+
+G is effect allele in Bryois and GTEx - increased G associates with reduced RUNX2. 
+Therefore, rs12197948-G  associates with reduced RUNX2 expression and reduced PSP risk.
+Risk allele is rs12197948-A and associates with increased RUNX2 expression.
+
+## C4A
+
+```{r}
+filter(gwas, snp == "rs2523524")
+#filter(bryois, Gene == "C4A")
+filter(gtex,  gene_name == "C4A")
+```
+
+SNP rs2523524 - G is ref, A is alt, with allele frequency ~ 10%.
+GWAS says controls have 88% G which increases to 90% in PSP cases.
+Therefore increased A decreases PSP risk. A is protective!
+Increased A associated with decreased C4A expression.
+
+rs2523524-G is risk allele and associates with increased C4A expression
+
+
+
+
