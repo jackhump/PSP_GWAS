@@ -90,7 +90,11 @@ locus_plot <-
   guides(colour = "none")# +
  # theme(legend.position = c(0.9, 0.95), legend.background = element_blank(), legend.direction="horizontal" )
 
-locus_plot
+locus_plot + 
+  geom_text_repel(data = filter(gwas, snp %in% c("rs1150754", "rs2523524") ), aes(x = end, y = -log10(p), label =  snp), min.segment.length = unit(0, "lines"),  direction = "x", nudge_x = 5e5   )
+
+
+
 
 ```
 
@@ -313,7 +317,7 @@ locus_plot + gene_plot + coloc_plot + coloc_locus_plot + plot_layout(nrow = 4, h
   theme(plot.margin = margin(1,5,1,5))
 
 multiplot
-ggsave(plot = multiplot, filename = here::here("figures/c4a_multiplot.pdf"), width = 8, height = 10)
+ggsave(plot = multiplot, filename = here::here("figures/c4a_multiplot.pdf"), width = 6.5, height = 9)
 
 ```
 
