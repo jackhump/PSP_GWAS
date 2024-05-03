@@ -1,6 +1,6 @@
 # Functional Genomics in a Genome-Wide Assocation Study of Progressive Supranuclear Palsy
 
-Jack Humphrey & Kurt Farrell
+Jack Humphrey, Ashvin Ravi & Kurt Farrell
 
 Icahn School of Medicine at Mount Sinai, New York
 
@@ -12,13 +12,15 @@ Icahn School of Medicine at Mount Sinai, New York
 
 Currently preprinted on [MedRxiv](https://www.biorxiv.org/content/10.1101/2023.11.09.565552v1)
 
-## Analysis
+## Pre-processing code
 
-All pre-processing code is located [here](https://github.com/RajLabMSSM/downstream-QTL)
+All code to run COLOC, LDSC, TWAS, etc is located [here](https://github.com/RajLabMSSM/downstream-QTL)
 
-R scripts in `scripts/`
+## Analysis code and figures
 
-knitted HTML files in `docs/`
+R markdown scripts are in `scripts/`
+
+knitted HTML files are in `docs/`
 
 
 
